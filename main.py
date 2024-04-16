@@ -1,109 +1,182 @@
 import pygame
-import random
+from copy import deepcopy
+from random import choice, randrange
+
+W, H = 10, 20
+TILE = 45
+GAME_RES = W * TILE, H * TILE
+RES = 750, 940
+FPS = 60
 
 pygame.init()
-
-# Установка параметров окна
-SCREEN_WIDTH = 800
-SCREEN_HEIGHT = 600
-BLOCK_SIZE = 30
-GRID_WIDTH = SCREEN_WIDTH // BLOCK_SIZE
-GRID_HEIGHT = SCREEN_HEIGHT // BLOCK_SIZE
-
-# Цвета
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-BLUE = (0, 0, 255)
-RED = (255, 0, 0)
-GREEN = (0, 255, 0)
-YELLOW = (255, 255, 0)
-
-# Инициализация окна
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("Tetris")
-
-# Функции для отрисовки блоков и сетки
-def draw_block(x, y, color):
-    pygame.draw.rect(screen, color, (x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE))
-
-def draw_grid():
-    for x in range(GRID_WIDTH):
-        pygame.draw.line(screen, WHITE, (x * BLOCK_SIZE, 0), (x * BLOCK_SIZE, SCREEN_HEIGHT))
-    for y in range(GRID_HEIGHT):
-        pygame.draw.line(screen, WHITE, (0, y * BLOCK_SIZE), (SCREEN_WIDTH, y * BLOCK_SIZE))
-
-# Инициализация игрового поля
-grid = [[0 for _ in range(GRID_WIDTH)] for _ in range(GRID_HEIGHT)]
-
-# Функция для создания нового блока
-def new_block():
-    tetrominos = [
-        [[1, 1, 1, 1]],
-        [[1, 1, 1], [0, 1, 0]],
-        [[1, 1, 1], [1, 0, 0]],
-        [[1, 1], [1, 1]],
-        [[1, 1, 0], [0, 1, 1]]
-    ]
-    block = random.choice(tetrominos)
-    return block, 0, GRID_WIDTH // 2 - len(block[0]) // 2
-
-block, block_rotation, block_x = new_block()
-game_over = False
-
+sc = pygame.display.set_mode(RES)
+game_sc = pygame.Surface(GAME_RES)
 clock = pygame.time.Clock()
 
-while not game_over:
-    screen.fill(BLACK)
-    draw_grid()
+grid = [pygame.Rect(x * TILE, y * TILE, TILE, TILE) for x in range(W) for y in range(H)]
 
-    for y, row in enumerate(grid):
-        for x, cell in enumerate(row):
-            if cell:
-                draw_block(x, y, cell)
+figures_pos = [[(-1, 0), (-2, 0), (0, 0), (1, 0)],
+               [(0, -1), (-1, -1), (-1, 0), (0, 0)],
+               [(-1, 0), (-1, 1), (0, 0), (0, -1)],
+               [(0, 0), (-1, 0), (0, 1), (-1, -1)],
+               [(0, 0), (0, -1), (0, 1), (-1, -1)],
+               [(0, 0), (0, -1), (0, 1), (1, -1)],
+               [(0, 0), (0, -1), (0, 1), (-1, 0)]]
 
-    # Падение блока
-    if not any(cell for row in grid for cell in row):
-        grid = [[0 for _ in range(GRID_WIDTH)] for _ in range(GRID_HEIGHT)]
-    else:
-        for y, row in list(enumerate(grid))[::-1]:
-            if not any(row):
-                break
-            if 0 in row:
-                continue
-            grid.pop(y)
-            grid.append([0 for _ in range(GRID_WIDTH)])
+figures = [[pygame.Rect(x + W // 2, y + 1, 1, 1) for x, y in fig_pos] for fig_pos in figures_pos]
+figure_rect = pygame.Rect(0, 0, TILE - 2, TILE - 2)
+field = [[0 for i in range(W)] for j in range(H)]
 
-    # Движение блока вниз
-    new_block_y = len(grid) - len(block) - 1
-    if new_block_y <= block_x:
-        game_over = True
-    for y, row in enumerate(block):
-        for x, cell in enumerate(row):
-            if cell:
-                draw_block(block_x + x, block_rotation + y, BLUE)
+anim_count, anim_speed, anim_limit = 0, 60, 2000
 
-    block_y = new_block_y
-    for y, row in enumerate(block):
-        for x, cell in enumerate(row):
-            if cell:
-                draw_block(block_x + x, block_y + y, BLUE)
+bg = pygame.image.load('img/bg.jpg').convert()
+game_bg = pygame.image.load('img/bg2.jpg').convert()
 
-    # Ввод с клавиатуры
+main_font = pygame.font.Font('font/font.ttf', 65)
+font = pygame.font.Font('font/font.ttf', 45)
+
+title_tetris = main_font.render('TETRIS', True, pygame.Color('darkorange'))
+title_score = font.render('score:', True, pygame.Color('green'))
+title_record = font.render('record:', True, pygame.Color('purple'))
+
+get_color = lambda : (randrange(30, 256), randrange(30, 256), randrange(30, 256))
+
+figure, next_figure = deepcopy(choice(figures)), deepcopy(choice(figures))
+color, next_color = get_color(), get_color()
+
+score, lines = 0, 0
+scores = {0: 0, 1: 100, 2: 300, 3: 700, 4: 1500}
+
+
+def check_borders():
+    if figure[i].x < 0 or figure[i].x > W - 1:
+        return False
+    elif figure[i].y > H - 1 or field[figure[i].y][figure[i].x]:
+        return False
+    return True
+
+
+def get_record():
+    try:
+        with open('record') as f:
+            return f.readline()
+    except FileNotFoundError:
+        with open('record', 'w') as f:
+            f.write('0')
+
+
+def set_record(record, score):
+    rec = max(int(record), score)
+    with open('record', 'w') as f:
+        f.write(str(rec))
+
+
+while True:
+    record = get_record()
+    dx, rotate = 0, False
+    sc.blit(bg, (0, 0))
+    sc.blit(game_sc, (20, 20))
+    game_sc.blit(game_bg, (0, 0))
+    # delay for full lines
+    for i in range(lines):
+        pygame.time.wait(200)
+    # control
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
-            game_over = True
+            exit()
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_LEFT:
+                dx = -1
+            elif event.key == pygame.K_RIGHT:
+                dx = 1
+            elif event.key == pygame.K_DOWN:
+                anim_limit = 100
+            elif event.key == pygame.K_UP:
+                rotate = True
+    # move x
+    figure_old = deepcopy(figure)
+    for i in range(4):
+        figure[i].x += dx
+        if not check_borders():
+            figure = deepcopy(figure_old)
+            break
+    # move y
+    anim_count += anim_speed
+    if anim_count > anim_limit:
+        anim_count = 0
+        figure_old = deepcopy(figure)
+        for i in range(4):
+            figure[i].y += 1
+            if not check_borders():
+                for i in range(4):
+                    field[figure_old[i].y][figure_old[i].x] = color
+                figure, color = next_figure, next_color
+                next_figure, next_color = deepcopy(choice(figures)), get_color()
+                anim_limit = 2000
+                break
+    # rotate
+    center = figure[0]
+    figure_old = deepcopy(figure)
+    if rotate:
+        for i in range(4):
+            x = figure[i].y - center.y
+            y = figure[i].x - center.x
+            figure[i].x = center.x - x
+            figure[i].y = center.y + y
+            if not check_borders():
+                figure = deepcopy(figure_old)
+                break
+    # check lines
+    line, lines = H - 1, 0
+    for row in range(H - 1, -1, -1):
+        count = 0
+        for i in range(W):
+            if field[row][i]:
+                count += 1
+            field[line][i] = field[row][i]
+        if count < W:
+            line -= 1
+        else:
+            anim_speed += 3
+            lines += 1
+    # compute score
+    score += scores[lines]
+    # draw grid
+    [pygame.draw.rect(game_sc, (40, 40, 40), i_rect, 1) for i_rect in grid]
+    # draw figure
+    for i in range(4):
+        figure_rect.x = figure[i].x * TILE
+        figure_rect.y = figure[i].y * TILE
+        pygame.draw.rect(game_sc, color, figure_rect)
+    # draw field
+    for y, raw in enumerate(field):
+        for x, col in enumerate(raw):
+            if col:
+                figure_rect.x, figure_rect.y = x * TILE, y * TILE
+                pygame.draw.rect(game_sc, col, figure_rect)
+    # draw next figure
+    for i in range(4):
+        figure_rect.x = next_figure[i].x * TILE + 380
+        figure_rect.y = next_figure[i].y * TILE + 185
+        pygame.draw.rect(sc, next_color, figure_rect)
+    # draw titles
+    sc.blit(title_tetris, (485, -10))
+    sc.blit(title_score, (535, 780))
+    sc.blit(font.render(str(score), True, pygame.Color('white')), (550, 840))
+    sc.blit(title_record, (525, 650))
+    sc.blit(font.render(record, True, pygame.Color('gold')), (550, 710))
+    # game over
+    for i in range(W):
+        if field[0][i]:
+            set_record(record, score)
+            field = [[0 for i in range(W)] for i in range(H)]
+            anim_count, anim_speed, anim_limit = 0, 60, 2000
+            score = 0
+            for i_rect in grid:
+                pygame.draw.rect(game_sc, get_color(), i_rect)
+                sc.blit(game_sc, (20, 20))
+                pygame.display.flip()
+                clock.tick(200)
 
-    keys = pygame.key.get_pressed()
-    if keys[pygame.K_LEFT]:
-        block_x -= 1
-    if keys[pygame.K_RIGHT]:
-        block_x += 1
-    if keys[pygame.K_DOWN]:
-        block_y += 1
-    if keys[pygame.K_UP]:
-        block_rotation = (block_rotation + 1) % 4
-
-    pygame.display.update()
-    clock.tick(5)
-
-pygame.quit()
+    pygame.display.flip()
+    clock.tick(FPS)
